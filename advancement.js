@@ -38,16 +38,18 @@ async function advanceCharacterSkills(char) {
   }
 
   Promise.all(markedSkills.map(rollSkill))
-      .then(advancements => {
+      .then(async(advancements) => {
         const attempts = advancements.length;
         const successes = advancements.filter(a => a.success).length;
         
         const header = `<h4>${char.name}</h4><h3>Rolling ${pluralize('advancement', advancements)} for <b>${attempts}</b> ${pluralize('skill', advancements)}</h3>`;
         const message = `${advancements.map(advanceSkill).join('<br>')}`;
-        const footer = `<hr>Succeeded on ${successes}/${attempts} ${pluralize('advancement', advancements)}<br>`
-          + `${buttons(actor, advancements)}`;
+        const footer = `<hr>Succeeded on ${successes}/${attempts} ${pluralize('advancement', advancements)}<br><div class="dod-advancement-buttons">Not accepted</div>`;
 
-        toChat(header + message + footer);
+        toChat(header + message + footer).then(async(msg) => {
+          let div = getMessageButtonDiv(msg);
+          getMessageButtonDiv(msg).innerHTML = buttons(actor, advancements)
+        });
       }).then(a => {
         $(document).on('click', `.${actor.id}-accept`, accept);
         $(document).on('click', `.${actor.id}-decline`, decline);
@@ -75,15 +77,15 @@ function advanceSkill(advancement) {
   if (advancement.current >= 18) {
     return `<b>${advancement.name}</b> ${failMessage} already 18`;
   }
-  return `<b>${advancement.name}</b> ${advancement.success ? okMessage : failMessage} ${toInlineRoll(advancement.roll)} (${advancement.current})`;
+  return `<b>${advancement.name}</b> ${advancement.success ? okMessage : failMessage} ${toInlineRoll(advancement.roll)} ${ advancement.success ? `(${advancement.current} → ${advancement.current+1})` : ""}`;
 }
 
 function toInlineRoll(roll) {
   return roll.toAnchor({classes: ['content-link']}).outerHTML;
 }
 
-function toChat(content) {
-  ChatMessage.create({
+async function toChat(content) {
+  return await ChatMessage.create({
     user: game.user._id,
     content
   });
@@ -138,11 +140,6 @@ function accept(event) {
   const messageActor = event.target.attributes['data-actor-id'].value;
   let currentActor = game.user.character;
 
-  if (!isGM && messageActor !== currentActor.id) {
-    // TODO whisper?
-    toChat("You can't access this character");
-  }
-
   if (isGM) {
     currentActor = game.actors.get(messageActor);
   }
@@ -160,17 +157,25 @@ function accept(event) {
       }
     });
 
-  const messageId = event.target.parentNode.parentNode.parentNode.attributes['data-message-id'].value;
+  const messageId = event.target.parentNode.parentNode.parentNode.parentNode.attributes['data-message-id'].value;
   const message = game.messages.get(messageId);
-  message.update({content: clearButtons(message, "<b>Changes applied</b>")});
+  clearButtons(message, "<b>CHANGES APPLIED</b>");
 }
 
-  function decline(event) {
-    const messageId = event.target.parentNode.parentNode.parentNode.attributes['data-message-id'].value;
-    const message = game.messages.get(messageId);
-    message.update({content: clearButtons(message, "<b>PLZ IGNORE</b>")});
-  }
+function decline(event) {
+  const messageId = event.target.parentNode.parentNode.parentNode.parentNode.attributes['data-message-id'].value;
+  const message = game.messages.get(messageId);
+  clearButtons(message, "<b>RESULTS IGNORED</b>");
+}
 
-function clearButtons(message, replace='') {
-  return message.content.replaceAll(/(\s+<button.*<\/button>\n?){2}/g, replace);
+function clearButtons(msg, replace='') {
+  let div = getMessageButtonDiv(msg);
+  div.innerHTML = replace;
+  div = getMessageButtonDiv(msg);
+  msg.update({content: div.parentElement.innerHTML});
+}
+
+function getMessageButtonDiv(msg) {
+  const div = document.querySelectorAll(`[data-message-id="${msg._id}"]`)[0];
+  return div.getElementsByClassName("dod-advancement-buttons")[0];
 }
